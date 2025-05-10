@@ -1,0 +1,144 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from tensorflow import keras
+from tensorflow.keras import layers, regularizers
+from tensorflow.keras.datasets import imdb
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
+
+# Parameters
+vocab_size = 10000
+maxlen = 200
+
+# Load IMDb dataset
+(X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocab_size)
+
+# Word decoding for reference
+word_index = imdb.get_word_index()
+reverse_word_index = {value: key for (key, value) in word_index.items()}
+decoded_review = ' '.join([reverse_word_index.get(i - 3, '?') for i in X_train[0]])
+print("\nSample Decoded Review:\n", decoded_review)
+print(f"Label (0 = Negative, 1 = Positive): {y_train[0]}")
+
+# Pad sequences
+X_train = pad_sequences(X_train, maxlen=maxlen)
+X_test = pad_sequences(X_test, maxlen=maxlen)
+
+print(f"\nShape after padding => X_train: {X_train.shape}, X_test: {X_test.shape}")
+
+# Model architecture
+model = keras.Sequential([
+    layers.Embedding(input_dim=vocab_size, output_dim=128, input_length=maxlen),
+    layers.GlobalAveragePooling1D(),
+    layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.01)),
+    layers.Dropout(0.5),
+    layers.Dense(32, activation='relu', kernel_regularizer=regularizers.l2(0.01)),
+    layers.Dropout(0.3),
+    layers.Dense(1, activation='sigmoid')
+])
+
+# Compile model
+model.compile(
+    optimizer='adam',
+    loss='binary_crossentropy',
+    metrics=['accuracy', keras.metrics.Precision(), keras.metrics.Recall()]
+)
+
+model.summary()
+
+# Early stopping
+early_stop = keras.callbacks.EarlyStopping(
+    monitor='val_loss',
+    patience=2,
+    restore_best_weights=True
+)
+
+# Train the model
+history = model.fit(
+    X_train, y_train,
+    validation_split=0.2,
+    epochs=15,
+    batch_size=128,
+    callbacks=[early_stop],
+    verbose=1
+)
+
+# Plot Accuracy & Loss
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(history.history['accuracy'], label='Train Accuracy')
+plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Model Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title('Model Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+# Evaluate model
+test_loss, test_acc, test_precision, test_recall = model.evaluate(X_test, y_test, verbose=0)
+print(f"\nTest Accuracy: {test_acc:.4f}")
+print(f"Test Precision: {test_precision:.4f}")
+print(f"Test Recall: {test_recall:.4f}")
+
+# Predict
+y_pred_prob = model.predict(X_test, verbose=0)
+y_pred = (y_pred_prob > 0.5).astype("int32").flatten()
+
+# Evaluation Metrics
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred, target_names=['Negative', 'Positive']))
+
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(6, 6))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=['Negative', 'Positive'],
+            yticklabels=['Negative', 'Positive'])
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.title('Confusion Matrix')
+plt.show()
+
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred)
+recall = recall_score(y_test, y_pred)
+f1 = f1_score(y_test, y_pred)
+
+print("\nAdditional Evaluation Metrics:")
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"F1 Score: {f1:.4f}")
+
+# Predict sentiment of custom text
+def predict_sentiment(text):
+    words = text.lower().split()
+    tokens = [word_index.get(word, 2) for word in words if word_index.get(word, 0) < vocab_size]
+    padded_tokens = pad_sequences([tokens], maxlen=maxlen)
+    
+    prediction = model.predict(padded_tokens)[0][0]
+    sentiment = "Positive" if prediction > 0.5 else "Negative"
+    print(f"\nReview: {text}")
+    print(f"Predicted Sentiment: {sentiment} (Confidence: {prediction:.4f})")
+
+sample_reviews = [
+    "This movie was fantastic! I really loved the acting and the plot was amazing.",
+    "The film was bad and way too long. I do not like watching it."
+]
+
+for review in sample_reviews:
+    predict_sentiment(review)
